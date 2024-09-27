@@ -15,7 +15,7 @@ Run `gig-gen` or `gig-gen --interactive` to display the available templates in a
 ![Screenshot](screenshot.png "Screenshot")
 
 *This screenshot shows the list of available templates filtered on "ca",
-with the `cake` and `freepascal` templates selected. (Obviously, `freepascal` was selected before the filter was applied.)*
+with the `cake` and `freepascal` templates selected.*
 
 You may select one or more of the available templates to add it to the selected template list and then generate a 
 `.gitignore` file for the selected templates.
