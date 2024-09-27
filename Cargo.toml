@@ -1,0 +1,14 @@
+[package]
+name = "gig-gen"
+version = "0.1.0"
+edition = "2021"
+authors = ["Paul Sobolik <psobolik@zoho.com>"]
+description = "Generate .gitingore file using gitignore.io API"
+license = "MIT"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+crossbeam-channel = "0.5"
+cursive = "0.21"
+minreq = { version = "2.12", features = ["https-rustls-probe"] }
+regex = "1.10.6"
