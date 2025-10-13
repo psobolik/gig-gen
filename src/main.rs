@@ -7,7 +7,6 @@ use args::{Args, Commands, FilterArgs};
 use cursive::{
     align::HAlign,
     event::{Event, EventResult, Key},
-    menu,
     style::{
         BaseColor, BorderStyle, Color, ColorStyle, Effect, Palette, PaletteColor, PaletteStyle,
         Style,
@@ -15,7 +14,7 @@ use cursive::{
     theme::Theme,
     traits::*,
     utils::markup::StyledString,
-    views::{Dialog, DummyView, LinearLayout, OnEventView, SelectView, TextView},
+    views::{Button, Dialog, DummyView, LinearLayout, OnEventView, SelectView, TextView},
     Cursive,
 };
 use std::fs::OpenOptions;
@@ -71,7 +70,6 @@ fn list_templates(args: FilterArgs) -> Result<(), Box<dyn std::error::Error + 's
             .collect();
         if templates.is_empty() {
             print_message(format!(r#"No templates match "{}""#, filter).as_str());
-            // println!(r#"No templates match "{}""#, filter);
         }
     }
     for template in templates {
@@ -120,23 +118,6 @@ fn interactive() {
     siv.set_user_data(user_data);
     siv.set_theme(theme());
 
-    siv.menubar()
-        .add_subtree(
-            "File",
-            menu::Tree::new().with(|tree| {
-                tree.add_leaf("Save ^S", save);
-                tree.add_leaf("Quit ^Q", Cursive::quit);
-            }),
-        )
-        .add_subtree(
-            "Help",
-            menu::Tree::new().with(|tree| {
-                tree.add_leaf("Help F1", help);
-                tree.add_leaf("About", about);
-            }),
-        );
-    siv.set_autohide_menu(false);
-
     siv.add_fullscreen_layer(event_view(main_layer()));
     refresh(&mut siv);
     siv.run();
@@ -172,26 +153,26 @@ fn theme() -> Theme {
 }
 fn event_view(content: impl View) -> impl View {
     fn clear_filter(siv: &mut Cursive) {
-        if let Some(user_data) = siv.user_data::<UserData>() {
+        siv.with_user_data(|user_data: &mut UserData| {
             user_data.filter = String::default();
             user_data.new_filter = true;
-        }
+        });
         refresh(siv);
     }
     fn backspace(siv: &mut Cursive) {
-        if let Some(user_data) = siv.user_data::<UserData>() {
+        siv.with_user_data(|user_data: &mut UserData| {
             if !user_data.filter.is_empty() {
                 user_data.filter = user_data.filter[..user_data.filter.len() - 1].to_string();
                 user_data.new_filter = true;
             }
-        }
+        });
         refresh(siv);
     }
     fn handle_char(siv: &mut Cursive, c: char) {
-        if let Some(user_data) = siv.user_data::<UserData>() {
+        siv.with_user_data(|user_data: &mut UserData| {
             user_data.filter += c.to_string().as_str();
             user_data.new_filter = true;
-        }
+        });
         refresh(siv);
     }
     OnEventView::new(content)
@@ -294,53 +275,58 @@ fn event_view(content: impl View) -> impl View {
 }
 fn main_layer() -> impl View {
     fn make_label(text: &str) -> impl View {
-        TextView::new(StyledString::styled(text, BaseColor::Yellow.dark())).h_align(HAlign::Center)
+        TextView::new(StyledString::styled(
+            text,
+            Style::from(BaseColor::Yellow.light()).combine(Effect::Bold),
+        ))
     }
-    fn make_layout(label: &str, name: &str, on_submit: fn(&mut Cursive, &str)) -> impl View {
-        fn make_select_view(name: &str, on_submit: fn(&mut Cursive, &str)) -> impl View {
-            SelectView::<String>::new()
-                .on_submit(on_submit)
-                .with_name(name)
-                .scrollable()
-                .wrap_with(OnEventView::new)
-                .on_pre_event_inner(Event::CtrlChar('n'), |view, _event| {
-                    view.on_event(Event::Key(Key::Down));
-                    Some(EventResult::Consumed(None))
-                })
-                .on_pre_event_inner(Event::CtrlChar('p'), |view, _event| {
-                    view.on_event(Event::Key(Key::Up));
-                    Some(EventResult::Consumed(None))
-                })
-        }
-        LinearLayout::vertical()
-            .child(make_label(label))
-            .child(make_select_view(name, on_submit))
-            .min_width(29)
-            .full_width()
-            .full_height()
+    fn make_list_view(title: &str, name: &str, on_submit: fn(&mut Cursive, &str)) -> impl View {
+        let select_view = SelectView::<String>::new()
+            .on_submit(on_submit)
+            .with_name(name)
+            .scrollable()
+            .wrap_with(OnEventView::new)
+            .on_pre_event_inner(Event::CtrlChar('n'), |view, _event| {
+                view.on_event(Event::Key(Key::Down));
+                Some(EventResult::Consumed(None))
+            })
+            .on_pre_event_inner(Event::CtrlChar('p'), |view, _event| {
+                view.on_event(Event::Key(Key::Up));
+                Some(EventResult::Consumed(None))
+            });
+        Dialog::around(select_view).title(title).full_screen()
     }
 
     let lists_layout = LinearLayout::horizontal()
-        .child(make_layout(
-            " Available templates ",
+        .child(make_list_view(
+            "Available templates",
             AVAILABLE_VIEW_NAME,
             select_item,
         ))
-        .child(DummyView::new().fixed_width(4))
-        .child(make_layout(
-            " Selected templates ",
+        .child(make_list_view(
+            "Selected templates",
             SELECTED_VIEW_NAME,
             unselect_item,
-        ));
+        ))
+        .full_screen();
 
     let filter_layout = LinearLayout::horizontal()
         .child(make_label("Filter:"))
         .child(TextView::new(String::default()).with_name(FILTER_VIEW_NAME));
 
-    LinearLayout::vertical()
-        .child(lists_layout)
+    let button_bar = LinearLayout::horizontal()
+        .child(Button::new_raw("[Save ^S]", save))
         .child(DummyView::new())
+        .child(Button::new_raw("[Help F1]", help))
+        .child(DummyView::new())
+        .child(Button::new_raw("[About]", about))
+        .child(DummyView::new())
+        .child(Button::new_raw("[Quit ^Q]", Cursive::quit));
+
+    LinearLayout::vertical()
         .child(filter_layout)
+        .child(lists_layout)
+        .child(button_bar)
 }
 fn save(siv: &mut Cursive) {
     siv.with_user_data(|user_data: &mut UserData| {
@@ -501,20 +487,21 @@ fn refresh(siv: &mut Cursive) {
 
         // Display the possibly filtered list of available templates
         available_view.clear();
-        user_data
-            .templates
-            .unselected_templates()
-            .iter()
-            .filter_map(|template| {
-                if !user_data.filter.is_empty()
-                    && !template.name().starts_with(user_data.filter.as_str())
-                {
-                    None
-                } else {
-                    Some(template.name())
-                }
-            })
-            .for_each(|template_name| available_view.add_item_str(template_name));
+        available_view.add_all_str(
+            user_data
+                .templates
+                .unselected_templates()
+                .iter()
+                .filter_map(|template| {
+                    if !user_data.filter.is_empty()
+                        && !template.name().contains(user_data.filter.as_str())
+                    {
+                        None
+                    } else {
+                        Some(template.name())
+                    }
+                }),
+        );
 
         // Set the selected item unless the list has just been filtered
         if !user_data.new_filter {
@@ -524,42 +511,45 @@ fn refresh(siv: &mut Cursive) {
 
         // Display the list of selected templates
         selected_view.clear();
-        user_data
-            .templates
-            .selected_templates()
-            .iter()
-            .for_each(|option| selected_view.add_item_str(option.name()));
+        selected_view.add_all_str(
+            user_data
+                .templates
+                .selected_templates()
+                .iter()
+                .map(|template| template.name()),
+        );
     });
 }
 fn help(siv: &mut Cursive) {
     let message = "Use this app to create a .gitignore file for one or more operating systems, programming languages or IDEs, using templates from https://www.toptal.com/developers/gitignore/
 
-Select the templates to include in the file.
-- Use the up and down arrows to highlight a template.
-- Press Enter to select the highlighted template.
-- Type the start of the template's name to filter the list.
+Select one or more of the available templates to include in the file.
+• Use the up and down arrows to highlight a template.
+• Press Enter to select the highlighted template.
+
+You may type part of a template name to filter the list of templates. Press the Esc key to clear the filter.
 
 Press Ctrl+S to write the .gitignore file to disk.
-- The .gitignore file will be written to the current directory.
-- If the .gitignore file already exists, you will be given the option of replacing it or appending to it.
+• The .gitignore file will be written to the current directory.
+• If the .gitignore file already exists, you will be given the option of replacing it or appending to it.
 
 Press Ctrl+Q to close the app without writing the .gitignore file.";
     siv.add_layer(Dialog::info(message).h_align(HAlign::Center));
 }
 fn about(siv: &mut Cursive) {
-    let mut styled = StyledString::styled("+---------------+\n", BaseColor::Yellow.dark());
-    styled.append(StyledString::styled("|", BaseColor::Yellow.dark()));
+    let mut styled = StyledString::styled("┌───────────────┐\n", BaseColor::Yellow.dark());
+    styled.append(StyledString::styled("│", BaseColor::Yellow.dark()));
     styled.append(StyledString::plain(" g i g - g e n "));
-    styled.append(StyledString::styled("|\n", BaseColor::Yellow.dark()));
+    styled.append(StyledString::styled("│\n", BaseColor::Yellow.dark()));
     styled.append(StyledString::styled(
-        "+---------------+\n",
+        "└───────────────┘\n",
         BaseColor::Yellow.dark(),
     ));
     styled.append(StyledString::plain(format!(
-        "v {}\n",
+        "v{}\n",
         env!("CARGO_PKG_VERSION")
     )));
-    styled.append(StyledString::plain("Copyright © 2024 Paul Sobolik\n\n"));
+    styled.append(StyledString::plain("Copyright © 2024, 25 Paul Sobolik\n\n"));
     styled.append(StyledString::plain("API and templates provided by\n"));
     styled.append(StyledString::plain(
         "https://www.toptal.com/developers/gitignore/",
