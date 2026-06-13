@@ -1,6 +1,10 @@
+mod api_error;
 mod args;
+mod error;
 mod gitignore_api;
 mod template;
+
+pub use api_error::ApiError;
 
 use crate::template::Templates;
 use args::{Args, Commands, FilterArgs};
@@ -17,6 +21,7 @@ use cursive::{
     views::{Button, Dialog, DummyView, LinearLayout, OnEventView, SelectView, TextView},
     Cursive,
 };
+use error::Error;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::Path;
@@ -42,44 +47,47 @@ struct UserData {
     final_message: Option<String>,
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
+fn main() -> Result<(), Error> {
     let args: Args = clap::Parser::parse();
     match args.command.unwrap_or(Commands::Interactive) {
         Commands::List(args) => list_templates(args),
         Commands::Generate(args) => generate_gitignore(args.templates),
-        Commands::Interactive => {
-            interactive();
+        Commands::Interactive => interactive(),
+    }
+}
+fn list_templates(args: FilterArgs) -> Result<(), Error> {
+    match gitignore_api::get_template_names() {
+        Ok(mut templates) => {
+            if let Some(filter) = args.filter {
+                let filter = regex::escape(filter.as_str());
+                let re = regex::Regex::new(filter.as_str())?;
+                templates = templates
+                    .iter()
+                    .filter_map(|t| {
+                        if re.is_match(t) {
+                            Some(t.to_string())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                if templates.is_empty() {
+                    print_message(format!(r#"No templates match "{}""#, filter).as_str());
+                }
+            }
+            for template in templates {
+                println!("{}", template);
+            }
             Ok(())
         }
-    }
-}
-fn list_templates(args: FilterArgs) -> Result<(), Box<dyn std::error::Error + 'static>> {
-    let mut templates = gitignore_api::get_template_names()?;
-    if let Some(filter) = args.filter {
-        let filter = regex::escape(filter.as_str());
-        let re = regex::Regex::new(filter.as_str())?;
-        templates = templates
-            .iter()
-            .filter_map(|t| {
-                if re.is_match(t) {
-                    Some(t.to_string())
-                } else {
-                    None
-                }
-            })
-            .collect();
-        if templates.is_empty() {
-            print_message(format!(r#"No templates match "{}""#, filter).as_str());
+        Err(error) => {
+            print_message("Problem getting list of templates");
+            Err(error.into())
         }
     }
-    for template in templates {
-        println!("{}", template);
-    }
-    Ok(())
 }
-fn generate_gitignore(
-    template_names: Vec<String>,
-) -> Result<(), Box<dyn std::error::Error + 'static>> {
+
+fn generate_gitignore(template_names: Vec<String>) -> Result<(), Error> {
     match gitignore_api::get_template(&template_names) {
         Ok(result) => {
             println!("{}", result);
@@ -95,21 +103,26 @@ fn generate_gitignore(
         }
     }
 }
-fn interactive() {
-    fn load_templates() -> Templates {
+fn interactive() -> Result<(), Error> {
+    fn load_templates() -> Result<Templates, Error> {
         let mut templates = Templates::new();
-        if let Ok(template_names) = gitignore_api::get_template_names() {
-            templates.set_list(template_names);
-        };
-        templates
-        // TODO: Handle error?
+        match gitignore_api::get_template_names() {
+            Ok(template_names) => {
+                templates.set_list(template_names);
+                Ok(templates)
+            }
+            Err(error) => {
+                print_message("Problem getting list of templates");
+                Err(error.into())
+            }
+        }
     }
     let mut siv = cursive::default();
     siv.add_global_callback(Event::CtrlChar('q'), |siv| siv.quit());
     siv.add_global_callback(Event::CtrlChar('s'), save);
     siv.add_global_callback(Event::Key(Key::F1), help);
     let user_data = UserData {
-        templates: load_templates(),
+        templates: load_templates()?,
         filter: String::default(),
         new_filter: false,
         cb_sink: siv.cb_sink().clone(),
@@ -126,6 +139,7 @@ fn interactive() {
             print_message(final_message);
         }
     });
+    Ok(())
 }
 fn print_message(message: &str) {
     eprintln!("[{}] \x1b[93m{}\x1b[0m", env!["CARGO_PKG_NAME"], message);
@@ -307,11 +321,10 @@ fn main_layer() -> impl View {
             "Selected templates",
             SELECTED_VIEW_NAME,
             unselect_item,
-        ))
-        .full_screen();
+        ));
 
     let filter_layout = LinearLayout::horizontal()
-        .child(make_label("Filter:"))
+        .child(make_label("Filter: "))
         .child(TextView::new(String::default()).with_name(FILTER_VIEW_NAME));
 
     let button_bar = LinearLayout::horizontal()
@@ -379,7 +392,7 @@ fn get_overwrite_choice(siv: &mut Cursive) {
     );
 }
 fn save_gitignore(siv: &mut Cursive, save_option: SaveOption) -> bool {
-    fn get_gitignore(siv: &mut Cursive) -> Option<Result<String, minreq::Error>> {
+    fn get_gitignore(siv: &mut Cursive) -> Option<Result<String, Error>> {
         siv.with_user_data(|user_data: &mut UserData| {
             let selected_templates = user_data.templates.selected_template_names();
             gitignore_api::get_template(&selected_templates)
@@ -483,7 +496,7 @@ fn refresh(siv: &mut Cursive) {
 
     siv.with_user_data(|user_data: &mut UserData| {
         // Display the filter
-        filter_view.set_content(format!(" {}", user_data.filter));
+        filter_view.set_content(user_data.filter.clone());
 
         // Display the possibly filtered list of available templates
         available_view.clear();
@@ -549,7 +562,7 @@ fn about(siv: &mut Cursive) {
         "v{}\n",
         env!("CARGO_PKG_VERSION")
     )));
-    styled.append(StyledString::plain("Copyright © 2024, 25 Paul Sobolik\n\n"));
+    styled.append(StyledString::plain("Copyright © 2024-26 Paul Sobolik\n\n"));
     styled.append(StyledString::plain("API and templates provided by\n"));
     styled.append(StyledString::plain(
         "https://www.toptal.com/developers/gitignore/",

@@ -9,7 +9,7 @@ A command line program to generate a .gitingore file, optionally using an intera
 See [USAGE.md][usage].
 
 ## License
-Copyright (c) 2024 Paul Sobolik
+Copyright (c) 2024-26 Paul Sobolik
 
 Licensed under the [MIT][mit] license.
 

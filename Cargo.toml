@@ -1,6 +1,6 @@
 [package]
 name = "gig-gen"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 authors = ["Paul Sobolik <psobolik@zoho.com>"]
 description = "Generate a .gitingore file using gitignore.io API"
